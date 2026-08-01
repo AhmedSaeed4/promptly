@@ -2,7 +2,7 @@
 
 Speak your prompts instead of typing them. A Windows desktop app that records your voice, transcribes it using Groq's Whisper API, and auto-pastes the text into whatever window is currently active — terminals, editors, browsers, chat apps, anywhere.
 
-Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and similar terminal-based AI tools, but works with any application that accepts text input.
+Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), OpenCode, and OpenAI Codex CLI, as well as similar coding tools. It works with any application that accepts text input.
 
 ---
 
