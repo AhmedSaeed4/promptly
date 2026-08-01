@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables (contains API keys — DO NOT commit)
+.env
+
+# PyInstaller build artifacts
+build/
+build-folder/
+build-onefile/
+dist/
+dist-folder/
+dist-onefile/
+*.spec
+
+# IDE
+.vscode/
+.idea/

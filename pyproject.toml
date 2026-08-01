@@ -1,0 +1,19 @@
+[project]
+name = "promptly"
+version = "0.1.0"
+description = "Voice input tool — speak your terminal prompts instead of typing them"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "groq>=1.1.2",
+    "numpy>=2.4.4",
+    "pyperclip>=1.11.0",
+    "pyqt6>=6.11.0",
+    "scipy>=1.17.1",
+    "sounddevice>=0.5.5",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.19.0",
+]

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2e333b"/>
+      <stop offset="100%" stop-color="#15171c"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f7f9fb"/>
+      <stop offset="100%" stop-color="#9aa2b0"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f7f9fb"/>
+      <stop offset="100%" stop-color="#a7b0bf"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8edf2"/>
+      <stop offset="100%" stop-color="#8b94a3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App tile background: dark rounded square with soft cyan glow -->
+  <rect x="10" y="10" width="236" height="236" rx="54" fill="url(#bg)"/>
+  <rect x="10" y="10" width="236" height="236" rx="54" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="2"/>
+  <circle cx="128" cy="128" r="78" fill="rgba(34,211,238,0.08)"/>
+
+  <!-- Microphone: silver metallic gradient -->
+  <g stroke="rgba(255,255,255,0.35)" stroke-width="2">
+    <!-- Mic body -->
+    <rect x="103" y="62" width="50" height="82" rx="25" fill="url(#silver)"/>
+    <!-- Holder arc (over the top) -->
+    <path d="M 66 100 A 62 62 0 0 0 190 100" fill="none" stroke="#f2f6fa" stroke-width="10" stroke-linecap="round"/>
+  </g>
+
+  <!-- Stand + base -->
+  <line x1="128" y1="176" x2="128" y2="198" stroke="#eef2f7" stroke-width="10" stroke-linecap="round"/>
+  <rect x="97" y="198" width="62" height="10" rx="5" fill="url(#base)"/>
+
+  <!-- Equalizer bars (same style as the overlay voice meter) -->
+  <g>
+    <!-- bars grow up and down from an invisible center -->
+    <rect x="188" y="155" width="6" height="27" rx="3" fill="url(#bar)"/>
+    <rect x="198" y="145" width="6" height="47" rx="3" fill="url(#bar)"/>
+    <rect x="208" y="159" width="6" height="19" rx="3" fill="url(#bar)"/>
+    <rect x="218" y="151" width="6" height="35" rx="3" fill="url(#bar)"/>
+    <rect x="228" y="162" width="6" height="13" rx="3" fill="url(#bar)"/>
+  </g>
+</svg>
