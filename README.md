@@ -110,7 +110,7 @@ The entire cycle takes just a few seconds depending on recording length.
 | Component | Technology | Purpose |
 |---|---|---|
 | GUI & System Tray | PyQt6 | Overlay widget, tray icon, settings dialog, signals/slots |
-| Global Hotkey | Win32 `RegisterHotKey` via `ctypes` | Ctrl+Alt+V hotkey that works globally without admin privileges |
+| Global Hotkey | Win32 `RegisterHotKey` via `ctypes` | Configurable modified-key hotkey that works globally without admin privileges |
 | Auto-Paste | Win32 `SendInput` via `ctypes` | Simulates Ctrl+V to paste into any window |
 | Microphone Recording | `sounddevice` + `numpy` + `scipy` | Captures 16kHz mono audio, saves as WAV |
 | Transcription | `groq` SDK | Calls Groq's Whisper API (cloud-based, no local GPU needed) |
@@ -146,7 +146,7 @@ All Windows API calls use `ctypes` (built into Python) — no extra packages nee
 ### 1. Clone and install dependencies
 
 ```bash
-cd voice-input
+cd Promptly
 uv sync
 ```
 
@@ -188,7 +188,7 @@ The app starts silently — a gray microphone icon appears in your system tray.
 | Close overlay | Click the **×** button on the overlay |
 | Alternative close | **Left-click** the tray icon again (toggles) |
 
-Note: Closing the overlay during recording will cancel it. Closing during transcription lets the transcription finish — the result still goes to your clipboard.
+Note: Closing the overlay during recording will cancel it. Closing during transcription lets the transcription finish — the result still goes to the clipboard and is auto-pasted when that setting is enabled.
 
 ### Test mode (no microphone needed)
 
@@ -200,7 +200,7 @@ Right-click the tray icon to access:
 
 - **🎤 Show Overlay / Hide Overlay** — toggle the overlay window
 - **🧪 Test with audio file...** — transcribe a file without a microphone
-- **⚙️ Settings** — configure API key, model, and auto-paste
+- **⚙️ Settings** — configure API key, language, mode, model, auto-paste, and hotkey
 - **❌ Quit** — exit the app
 
 ### Settings
@@ -242,7 +242,7 @@ After Done or Error states, the application returns to Ready after a few seconds
 ## Project Structure
 
 ```
-voice-input/
+Promptly/
 ├── main.py              # Entry point — bootstraps PyQt6 app
 ├── app.py               # PromptlyApp — orchestrates all components
 ├── recorder.py          # AudioRecorder — captures mic audio via sounddevice
@@ -251,6 +251,9 @@ voice-input/
 ├── hotkey.py            # Global Ctrl+Alt+V hotkey via Win32 RegisterHotKey
 ├── overlay.py           # Floating overlay widget (Xbox Game Bar style)
 ├── settings_dialog.py   # Settings dialog (API key, model, auto-paste)
+├── app-icon.svg         # Runtime/tray/overlay icon
+├── app-icon.ico         # Windows executable icon
+├── build.bat            # Windows one-file build command
 ├── pyproject.toml       # Project config and dependencies
 └── uv.lock              # Locked dependency versions
 ```
@@ -305,8 +308,7 @@ PyInstaller is included as a dev dependency. To build:
 ### Single-file .exe (recommended for sharing)
 
 ```bash
-uv run pyinstaller --noconfirm --onefile --windowed --name "Promptly" \
-  --distpath "dist-onefile" --workpath "build-onefile" main.py
+build.bat
 ```
 
 Output: `dist-onefile/Promptly.exe` (~81MB)
@@ -315,6 +317,7 @@ Output: `dist-onefile/Promptly.exe` (~81MB)
 
 ```bash
 uv run pyinstaller --noconfirm --windowed --name "Promptly" \
+  --icon "app-icon.ico" --add-data "app-icon.svg;." \
   --distpath "dist-folder" --workpath "build-folder" main.py
 ```
 
