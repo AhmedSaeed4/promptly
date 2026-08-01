@@ -343,6 +343,14 @@ class PromptlyApp(QObject):
         self.overlay.show()
         self._sync_overlay_tray_action()
 
+    def activate_existing_instance(self) -> None:
+        """Show the existing overlay when a second launch is attempted."""
+        if self._shutting_down:
+            return
+        self._show_overlay()
+        self.overlay.raise_()
+        self.overlay.activateWindow()
+
     def _hide_overlay(self) -> None:
         """Hide the overlay. Cancels recording if active, lets transcription finish."""
         if self._shutting_down:
@@ -492,7 +500,7 @@ class PromptlyApp(QObject):
             return
 
         duration = len(audio) / self.recorder.sample_rate
-        print(f"[promptly] Recorded {duration:.1f}s → {busy_label.lower()}...")
+        print(f"[promptly] Recorded {duration:.1f}s -> {busy_label.lower()}...")
 
         # Start transcription in background thread.
         # Translation is only supported by whisper-large-v3, so force it.
