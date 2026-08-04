@@ -33,6 +33,12 @@ MODES = [
     ("Translate to English", "translate"),
 ]
 
+# Overlay styles — both remain available so users can choose their preferred UI.
+OVERLAY_STYLES = [
+    ("Classic (Game Bar)", "classic"),
+    ("Minimal pill", "minimal"),
+]
+
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -54,7 +60,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Promptly — Settings")
-        self.setFixedSize(420, 400)
+        self.setFixedSize(420, 470)
         self.setModal(True)
 
         self._settings = QSettings("Promptly", "Promptly")
@@ -104,6 +110,21 @@ class SettingsDialog(QDialog):
         self.auto_paste_check = QCheckBox("Automatically paste into active terminal")
         self.auto_paste_check.setChecked(True)
         form.addRow("", self.auto_paste_check)
+
+        # Overlay style
+        self.overlay_style_combo = QComboBox()
+        for label, value in OVERLAY_STYLES:
+            self.overlay_style_combo.addItem(label, value)
+        form.addRow("Overlay style:", self.overlay_style_combo)
+
+        # Overlay visibility
+        self.overlay_auto_hide_check = QCheckBox(
+            "Auto-hide overlay after transcription"
+        )
+        self.overlay_auto_hide_check.setToolTip(
+            "Show the overlay when recording starts and hide it when transcription finishes."
+        )
+        form.addRow("Overlay visibility:", self.overlay_auto_hide_check)
 
         # Hotkey (user-selectable, press the combo in the box)
         self.hotkey_edit = QKeySequenceEdit(QKeySequence("Ctrl+Alt+V"))
@@ -169,6 +190,15 @@ class SettingsDialog(QDialog):
         auto_paste = self._settings.value("auto_paste", True, type=bool)
         self.auto_paste_check.setChecked(auto_paste)
 
+        overlay_style = self._settings.value("overlay_style", "classic") or "classic"
+        index = self.overlay_style_combo.findData(overlay_style)
+        self.overlay_style_combo.setCurrentIndex(index if index >= 0 else 0)
+
+        overlay_auto_hide = self._settings.value(
+            "overlay_auto_hide", False, type=bool
+        )
+        self.overlay_auto_hide_check.setChecked(overlay_auto_hide)
+
         hotkey = self._settings.value("hotkey", "") or ""
         if hotkey:
             self.hotkey_edit.setKeySequence(QKeySequence(hotkey))
@@ -180,6 +210,8 @@ class SettingsDialog(QDialog):
         mode = self.mode_combo.currentData() or "transcribe"
         language = self.language_combo.currentData() or ""
         auto_paste = self.auto_paste_check.isChecked()
+        overlay_style = self.overlay_style_combo.currentData() or "classic"
+        overlay_auto_hide = self.overlay_auto_hide_check.isChecked()
 
         if not api_key:
             QMessageBox.warning(
@@ -204,6 +236,8 @@ class SettingsDialog(QDialog):
         self._settings.setValue("mode", mode)
         self._settings.setValue("language", language)
         self._settings.setValue("auto_paste", auto_paste)
+        self._settings.setValue("overlay_style", overlay_style)
+        self._settings.setValue("overlay_auto_hide", overlay_auto_hide)
         self._settings.setValue("hotkey", hotkey_text)
 
         self.accept()
