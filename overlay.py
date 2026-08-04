@@ -1,15 +1,18 @@
-"""Floating overlay widget — Xbox Game Bar style design with bottom accent line."""
+"""Floating overlay widgets for the Classic and Minimal Promptly designs."""
 
+import math
 import os
 import sys
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
     QCursor,
     QLinearGradient,
     QPainter,
+    QPainterPath,
+    QPen,
     QPixmap,
 )
 from PyQt6.QtWidgets import (
@@ -599,3 +602,287 @@ class Overlay(QWidget):
             hint="retry",
             btn_text="⏵",
         )
+
+
+class MinimalOverlay(QWidget):
+    """Compact monochrome pill overlay with only close and action controls."""
+
+    toggle_requested = pyqtSignal()
+    close_requested = pyqtSignal()
+
+    READY = "ready"
+    RECORDING = "recording"
+    TRANSCRIBING = "transcribing"
+    DONE = "done"
+    ERROR = "error"
+
+    WIDTH = 116
+    HEIGHT = 29
+    PILL_X = 0
+    PILL_Y = 0
+    PILL_WIDTH = 116
+    PILL_HEIGHT = 29
+    CONTROL_WIDTH = 28
+    BAR_COUNT = 7
+    BAR_WIDTH = 2
+    BAR_GAP = 2
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("minimalOverlayWidget")
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFixedSize(self.WIDTH, self.HEIGHT)
+
+        self._drag_start_global = None
+        self._last_global = None
+        self._hotkey_text = "Ctrl+Alt+V"
+        self._visual_state = self.READY
+        self._success_text = "Pasted"
+        self._error_message = ""
+        self._elapsed = 0.0
+        self._level = 0.0
+        self._phase = 0.0
+
+        self._wave_timer = QTimer(self)
+        self._wave_timer.setInterval(90)
+        self._wave_timer.timeout.connect(self._animate_wave)
+
+        self._position()
+
+    def _position(self) -> None:
+        """Position at top-center of screen."""
+        screen = QApplication.primaryScreen().availableGeometry()
+        x = (screen.width() - self.width()) // 2
+        self.move(x, 16)
+
+    def _animate_wave(self) -> None:
+        self._phase += 0.42
+        self.update()
+
+    def _set_state(self, state: str) -> None:
+        self._visual_state = state
+        if state == self.RECORDING:
+            self._wave_timer.start()
+        else:
+            self._wave_timer.stop()
+        self.update()
+
+    def set_hotkey_text(self, text: str) -> None:
+        """Keep the same interface as the Classic overlay."""
+        self._hotkey_text = text
+
+    def show_current_state(self) -> None:
+        """Re-render the last visual state after the overlay is shown again."""
+        if self._visual_state == self.RECORDING:
+            self.show_recording()
+        elif self._visual_state == self.TRANSCRIBING:
+            self.show_transcribing()
+        elif self._visual_state == self.DONE:
+            self.show_done(self._success_text)
+        elif self._visual_state == self.ERROR:
+            self.show_error(self._error_message)
+        else:
+            self.show_ready()
+
+    def show_ready(self) -> None:
+        """Ready state with a quiet waveform."""
+        self._level = 0.0
+        self._set_state(self.READY)
+
+    def show_recording(self) -> None:
+        """Recording state with a live waveform and elapsed timer."""
+        self._elapsed = 0.0
+        self._level = 0.0
+        self._set_state(self.RECORDING)
+
+    def update_recording(self, seconds: float, level: float) -> None:
+        """Update the timer and waveform from the recorder."""
+        if self._visual_state != self.RECORDING:
+            return
+        self._elapsed = max(0.0, seconds)
+        self._level = max(0.0, min(1.0, level))
+        self.update()
+
+    def show_transcribing(self) -> None:
+        """Transcribing state with a subdued static waveform."""
+        self._level = 0.0
+        self._set_state(self.TRANSCRIBING)
+
+    def show_done(self, text: str = "Pasted") -> None:
+        """Done state with a brighter border."""
+        self._success_text = text
+        self._set_state(self.DONE)
+
+    def show_copied(self) -> None:
+        """Copied state — used when auto-paste is off."""
+        self.show_done("Copied")
+
+    def show_error(self, message: str) -> None:
+        """Error state with a subdued waveform."""
+        self._error_message = message
+        self._set_state(self.ERROR)
+
+    def _border_alpha(self) -> int:
+        return {
+            self.READY: 72,
+            self.RECORDING: 72,
+            self.TRANSCRIBING: 72,
+            self.DONE: 148,
+            self.ERROR: 107,
+        }.get(self._visual_state, 72)
+
+    def _format_elapsed(self) -> str:
+        minutes, seconds = int(self._elapsed) // 60, int(self._elapsed) % 60
+        return f"{minutes}:{seconds:02d}"
+
+    def _wave_geometry(self) -> tuple[float, bool]:
+        wave_width = self.BAR_COUNT * self.BAR_WIDTH + (self.BAR_COUNT - 1) * self.BAR_GAP
+        show_timer = self._visual_state == self.RECORDING
+        content_width = wave_width + (6 + 25 if show_timer else 0)
+        middle_left = self.PILL_X + 24
+        middle_width = self.PILL_WIDTH - 48
+        return middle_left + (middle_width - content_width) / 2, show_timer
+
+    def _paint_wave(self, painter: QPainter) -> None:
+        start_x, show_timer = self._wave_geometry()
+        center_y = self.PILL_Y + self.PILL_HEIGHT / 2
+        profiles = (0.45, 0.7, 0.9, 1.0, 0.9, 0.7, 0.45)
+
+        for index, profile in enumerate(profiles):
+            if self._visual_state == self.RECORDING:
+                motion = 0.55 + 0.45 * abs(math.sin(self._phase + index * 0.65))
+                strength = max(0.18, min(1.0, 0.2 + self._level * 0.7 + motion * 0.3))
+            elif self._visual_state == self.TRANSCRIBING:
+                strength = 0.32
+            elif self._visual_state in (self.DONE, self.ERROR):
+                strength = 0.24
+            else:
+                strength = 0.38
+
+            height = max(2.0, 16 * profile * strength)
+            x = start_x + index * (self.BAR_WIDTH + self.BAR_GAP)
+            y = center_y - height / 2
+            alpha = 235 if self._visual_state == self.RECORDING else 150
+            painter.setBrush(QColor(255, 255, 255, alpha))
+            painter.drawRoundedRect(QRectF(x, y, self.BAR_WIDTH, height), 1.0, 1.0)
+
+        if show_timer:
+            timer_x = start_x + self.BAR_COUNT * self.BAR_WIDTH + (self.BAR_COUNT - 1) * self.BAR_GAP + 6
+            painter.setPen(QColor(255, 255, 255, 185))
+            font = painter.font()
+            font.setFamily("Consolas")
+            font.setPixelSize(9)
+            painter.setFont(font)
+            painter.drawText(
+                QRectF(timer_x, self.PILL_Y, 25, self.PILL_HEIGHT),
+                Qt.AlignmentFlag.AlignVCenter,
+                self._format_elapsed(),
+            )
+
+    def _paint_close(self, painter: QPainter) -> None:
+        center_x = self.PILL_X + 14
+        center_y = self.PILL_Y + self.PILL_HEIGHT / 2
+        circle = QRectF(center_x - 9.5, center_y - 9.5, 19, 19)
+        painter.setBrush(QColor(255, 255, 255, 20))
+        painter.setPen(QPen(QColor(255, 255, 255, 107), 1))
+        painter.drawEllipse(circle)
+        pen = QPen(QColor(255, 255, 255, 230), 1.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(center_x - 3.3, center_y - 3.3)
+        path.lineTo(center_x + 3.3, center_y + 3.3)
+        path.moveTo(center_x + 3.3, center_y - 3.3)
+        path.lineTo(center_x - 3.3, center_y + 3.3)
+        painter.drawPath(path)
+
+    def _paint_check(self, painter: QPainter) -> None:
+        center_x = self.PILL_X + self.PILL_WIDTH - 14
+        center_y = self.PILL_Y + self.PILL_HEIGHT / 2
+        circle = QRectF(center_x - 9.5, center_y - 9.5, 19, 19)
+        painter.setBrush(QColor(255, 255, 255, 20))
+        painter.setPen(QPen(QColor(255, 255, 255, 107), 1))
+        painter.drawEllipse(circle)
+        pen = QPen(QColor(255, 255, 255, 230), 1.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(center_x - 2.5, center_y)
+        path.lineTo(center_x - 0.83, center_y + 1.67)
+        path.lineTo(center_x + 2.5, center_y - 2.08)
+        painter.drawPath(path)
+
+    def paintEvent(self, event) -> None:
+        """Paint the monochrome pill and its state-dependent waveform."""
+        painter = QPainter(self)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
+        pill_path = QPainterPath()
+        pill_path.addRoundedRect(
+            QRectF(
+                self.PILL_X + 0.5,
+                self.PILL_Y + 0.5,
+                self.PILL_WIDTH - 1.0,
+                self.PILL_HEIGHT - 1.0,
+            ),
+            14.0,
+            14.0,
+        )
+        painter.setBrush(QColor(0, 0, 0, 255))
+        painter.fillPath(pill_path, painter.brush())
+        painter.setPen(QPen(QColor(255, 255, 255, self._border_alpha()), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(pill_path)
+        self._paint_wave(painter)
+        self._paint_close(painter)
+        self._paint_check(painter)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            global_position = event.globalPosition().toPoint()
+            self._drag_start_global = global_position
+            self._last_global = global_position
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._last_global is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            global_position = event.globalPosition().toPoint()
+            self.move(self.pos() + global_position - self._last_global)
+            self._last_global = global_position
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton or self._drag_start_global is None:
+            return
+
+        start = self._drag_start_global
+        self._drag_start_global = None
+        self._last_global = None
+        global_position = event.globalPosition().toPoint()
+        if (global_position - start).manhattanLength() > 4:
+            return
+
+        position = event.position().toPoint()
+        in_close_button = (
+            self.PILL_X + 4 <= position.x() <= self.PILL_X + 24
+            and self.PILL_Y + 5 <= position.y() <= self.PILL_Y + 24
+        )
+        if in_close_button:
+            self.close_requested.emit()
+        else:
+            self.toggle_requested.emit()
+        event.accept()
+
+    def closeEvent(self, event) -> None:
+        """Hide through the app so tray state stays synchronized."""
+        event.ignore()
+        self.close_requested.emit()

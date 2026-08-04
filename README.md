@@ -11,12 +11,12 @@ Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - **Configurable global hotkey** — press to start recording, press again to stop. Works anywhere without admin privileges. The default is Ctrl+Alt+V; conflicts are reported and the previous working hotkey is restored.
 - **Desktop app** — lives in your system tray. Click the tray icon to open the overlay, use it, close it when you're done.
 - **Auto-paste** — transcribed text is automatically pasted into the active window via Ctrl+V, and also copied to the clipboard so you can paste it again anywhere.
-- **Xbox Game Bar-style overlay** — a compact, dark, semi-transparent floating bar at the top-center of your screen. Shows the current state (Ready, Recording, Transcribing, Done, Error) with subtle color accents. Draggable to reposition. Has start/stop and close buttons.
+- **Two overlay designs** — choose between the existing Xbox Game Bar-style bar or a compact black-and-white pill from Settings. Both show the current state and are draggable.
 - **System tray icon** — lives in your system tray with a context menu. Icon color changes to reflect the current state (gray = idle, red = recording, blue = transcribing, green = done).
 - **First-launch setup** — on first run, the Settings dialog opens automatically so you can enter your API key. No manual setup needed.
 - **Background transcription** — transcription runs in a background thread so the UI never freezes.
 - **Test mode** — transcribe an audio or video file without needing a microphone. Supports WAV, MP3, M4A, OGG, FLAC, WEBM, MP4, AVI, MKV, MOV, WMV, TS.
-- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, and hotkey. Settings are persisted through QSettings in the Windows registry.
+- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, hotkey, overlay design, and overlay visibility. Settings are persisted through QSettings in the Windows registry.
 - **Error handling** — friendly error messages for missing microphone, recordings that are too short, no speech detected, and API failures.
 - **Portable** — single `.exe` file, no installation required. Works on any Windows 64-bit laptop.
 
@@ -200,7 +200,7 @@ Right-click the tray icon to access:
 
 - **🎤 Show Overlay / Hide Overlay** — toggle the overlay window
 - **🧪 Test with audio file...** — transcribe a file without a microphone
-- **⚙️ Settings** — configure API key, language, mode, model, auto-paste, and hotkey
+- **⚙️ Settings** — configure API key, language, mode, model, auto-paste, hotkey, overlay design, and overlay visibility
 - **❌ Quit** — exit the app
 
 ### Settings
@@ -211,6 +211,8 @@ Right-click the tray icon to access:
 | Model | Whisper Large v3 Turbo (fast) / Whisper Large v3 (accurate) | Turbo |
 | Auto-paste | On/Off | On |
 | Hotkey | Any supported modified key combination | Ctrl+Alt+V |
+| Overlay style | Classic (Game Bar) / Minimal pill | Classic |
+| Overlay visibility | Always visible / Auto-hide after transcription | Always visible |
 
 Settings are saved through QSettings in the Windows registry.
 
@@ -231,7 +233,7 @@ The floating overlay shows the current app state with distinct visual cues:
 The overlay is:
 - **Always on top** — visible over all windows
 - **Draggable** — click and drag to reposition
-- **Compact** — 340×44 pixels
+- **Compact** — 340×44 pixels in Classic style or a 116×29 pixel Minimal pill
 - **Semi-transparent** — dark charcoal base with subtle colored accents
 - **Drop-shadowed** — visible on both light and dark backgrounds
 
@@ -249,8 +251,8 @@ Promptly/
 ├── transcriber.py       # Groq Whisper API transcription
 ├── paster.py            # Clipboard copy + Ctrl+V simulation via Win32
 ├── hotkey.py            # Global Ctrl+Alt+V hotkey via Win32 RegisterHotKey
-├── overlay.py           # Floating overlay widget (Xbox Game Bar style)
-├── settings_dialog.py   # Settings dialog (API key, model, auto-paste)
+├── overlay.py           # Floating overlay widgets (Classic and Minimal)
+├── settings_dialog.py   # Settings dialog (API key, model, overlay style)
 ├── app-icon.svg         # Runtime/tray/overlay icon
 ├── app-icon.ico         # Windows executable icon
 ├── build.bat            # Windows one-file build command

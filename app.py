@@ -13,7 +13,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import QApplication, QFileDialog, QDialog, QMenu, QSystemTrayIcon
 
 from hotkey import MOD_ALT, MOD_CONTROL, VK_V, GlobalHotkey, parse_hotkey
-from overlay import Overlay
+from overlay import MinimalOverlay, Overlay
 from paster import copy_to_clipboard, paste_into_terminal
 from recorder import AudioRecorder
 from settings_dialog import SettingsDialog
@@ -100,9 +100,8 @@ class PromptlyApp(QObject):
 
         # Components
         self.recorder = AudioRecorder()
-        self.overlay = Overlay()
-        self.overlay.toggle_requested.connect(self._toggle)
-        self.overlay.close_requested.connect(self._hide_overlay)
+        self._overlay_style = self._get_overlay_style()
+        self.overlay = self._create_overlay(self._overlay_style)
 
         # System tray (must exist before the hotkey can show failure notifications)
         self._setup_tray()
@@ -149,9 +148,45 @@ class PromptlyApp(QObject):
         self._check_first_launch()
 
         # Show the overlay on startup so new users see the interface right away
-        self._show_overlay()
+        if not self._overlay_auto_hide():
+            self._show_overlay()
 
     # ── Tray Icon ────────────────────────────────────────────────────────────
+
+    def _get_overlay_style(self) -> str:
+        """Read the saved overlay style, falling back to the existing design."""
+        settings = QSettings("Promptly", "Promptly")
+        style = str(settings.value("overlay_style", "classic") or "classic")
+        return style if style in ("classic", "minimal") else "classic"
+
+    def _create_overlay(self, style: str):
+        """Create the selected overlay and connect its shared app signals."""
+        overlay = MinimalOverlay() if style == "minimal" else Overlay()
+        overlay.toggle_requested.connect(self._toggle)
+        overlay.close_requested.connect(self._hide_overlay)
+        return overlay
+
+    def _set_overlay_style(self, style: str) -> None:
+        """Switch overlay designs without restarting or losing its screen position."""
+        style = style if style in ("classic", "minimal") else "classic"
+        if style == self._overlay_style:
+            return
+
+        old_overlay = self.overlay
+        was_visible = old_overlay.isVisible()
+        old_center = old_overlay.frameGeometry().center()
+        old_overlay.hide()
+
+        self._overlay_style = style
+        self.overlay = self._create_overlay(style)
+        self.overlay.move(old_center - self.overlay.rect().center())
+        self.overlay.set_hotkey_text(self._hotkey_text)
+        old_overlay.deleteLater()
+
+        if was_visible:
+            self._render_overlay_state()
+            self.overlay.show()
+        self._sync_overlay_tray_action()
 
     def _icon_path(self) -> str:
         """Locate the bundled app-icon.svg (inside the exe when frozen)."""
@@ -314,6 +349,22 @@ class PromptlyApp(QObject):
         if self.overlay.isVisible():
             self._hide_overlay()
         else:
+            self._show_overlay()
+
+    def _overlay_auto_hide(self) -> bool:
+        """Whether the overlay should hide after the recording workflow ends."""
+        settings = QSettings("Promptly", "Promptly")
+        return settings.value("overlay_auto_hide", False, type=bool)
+
+    def _apply_overlay_visibility_setting(self) -> None:
+        """Apply the overlay visibility preference after Settings is saved."""
+        if self._overlay_auto_hide():
+            if self._state != self.RECORDING:
+                self.overlay.hide()
+                self._sync_overlay_tray_action()
+            return
+
+        if not self.overlay.isVisible():
             self._show_overlay()
 
     def _render_overlay_state(self) -> None:
@@ -559,6 +610,9 @@ class PromptlyApp(QObject):
         self._success_action = action
         self._error_message = ""
         self._render_overlay_state()
+        if self._overlay_auto_hide():
+            self.overlay.hide()
+            self._sync_overlay_tray_action()
         self.tray_icon.setIcon(self._create_icon("green"))
         self.tray_icon.setToolTip(f"Promptly — {action}!")
 
@@ -584,6 +638,9 @@ class PromptlyApp(QObject):
         self._state = self.ERROR
         self._error_message = message
         self._render_overlay_state()
+        if self._overlay_auto_hide():
+            self.overlay.hide()
+            self._sync_overlay_tray_action()
         self.tray_icon.showMessage(
             "Promptly",
             f"❌ {message}",
@@ -606,6 +663,9 @@ class PromptlyApp(QObject):
         self._state = self.IDLE
         self._error_message = ""
         self._render_overlay_state()
+        if self._overlay_auto_hide():
+            self.overlay.hide()
+            self._sync_overlay_tray_action()
         self.tray_icon.setIcon(self._create_icon("gray"))
         self.tray_icon.setToolTip("Promptly — Ready")
         self.test_action.setEnabled(True)
@@ -763,6 +823,8 @@ class PromptlyApp(QObject):
             return
 
         self._replace_hotkey(hotkey_text, parsed)
+        self._set_overlay_style(self._get_overlay_style())
+        self._apply_overlay_visibility_setting()
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
