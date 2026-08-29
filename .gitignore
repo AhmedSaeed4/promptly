@@ -22,3 +22,9 @@ dist-onefile/
 # IDE
 .vscode/
 .idea/
+
+# Local demo/preview files (testing only — never push)
+demo-*.html
+
+# Local AI-tool settings
+.claude/
