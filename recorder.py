@@ -1,6 +1,6 @@
 """Microphone audio recorder using sounddevice."""
 
-import tempfile
+import io
 
 import numpy as np
 import sounddevice as sd
@@ -95,19 +95,22 @@ class AudioRecorder:
         self._chunks = []
         return audio
 
-    def save_wav(self, audio: np.ndarray) -> str | None:
-        """Save a numpy audio array to a temporary WAV file.
+    def wav_bytes(self, audio: np.ndarray) -> bytes | None:
+        """Encode a numpy audio array to in-memory WAV bytes.
 
-        Returns the file path, or None if the recording is too short.
+        The recording never touches disk — the bytes are held in RAM so a
+        failed transcription can be retried without losing the audio.
+
+        Returns the WAV-encoded bytes, or None if the recording is too short.
         """
         duration = len(audio) / self.sample_rate
 
         if duration < MIN_DURATION:
             return None
 
-        temp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        write_wav(temp.name, self.sample_rate, audio)
-        return temp.name
+        buffer = io.BytesIO()
+        write_wav(buffer, self.sample_rate, audio)
+        return buffer.getvalue()
 
     @property
     def duration(self) -> float:

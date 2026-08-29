@@ -17,51 +17,84 @@ from overlay import MinimalOverlay, Overlay
 from paster import copy_to_clipboard, paste_into_terminal
 from recorder import AudioRecorder
 from settings_dialog import SettingsDialog
-from transcriber import transcribe, translate_to_english
+from transcriber import is_retryable_error, transcribe, translate_to_english
 
 # ── Transcription Worker ─────────────────────────────────────────────────────
 
 
 class TranscriptionWorker(QThread):
-    """Runs transcription in a background thread to keep the UI responsive."""
+    """Runs transcription in a background thread to keep the UI responsive.
+
+    Transient connection failures are retried automatically up to
+    MAX_ATTEMPTS times (with short delays) before the error surfaces, so a
+    brief network blip self-heals without losing the recording.
+    """
 
     done = pyqtSignal(str)
-    error = pyqtSignal(str)
+    error = pyqtSignal(str, bool)  # message, retryable?
+    retry_scheduled = pyqtSignal(int, int)  # next attempt, max attempts
+
+    MAX_ATTEMPTS = 3
+    RETRY_DELAYS = (2.0, 4.0)  # seconds before the 2nd / 3rd attempt
 
     def __init__(
         self,
-        file_path: str,
+        source: str | bytes,
         model: str,
         language: str = "",
         mode: str = "transcribe",
-        cleanup: bool = True,
     ):
         super().__init__()
-        self.file_path = file_path
+        self.source = source  # file path (test mode) or WAV bytes (mic)
         self.model = model
         self.language = language
         self.mode = mode  # "transcribe" (same language) or "translate" (to English)
-        self.cleanup = cleanup  # If True, delete the file after transcription
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Ask the worker to stop between attempts (best effort)."""
+        self._cancelled = True
+
+    def _transcribe_once(self) -> str:
+        if self.mode == "translate":
+            return translate_to_english(self.source, self.model)
+        return transcribe(self.source, self.model, self.language)
 
     def run(self) -> None:
-        try:
-            import transcriber as _transcriber
+        import transcriber as _transcriber
 
-            _transcriber._client = None  # Force client to re-read the API key
+        _transcriber._client = None  # Force client to re-read the API key
 
-            if self.mode == "translate":
-                text = translate_to_english(self.file_path, self.model)
-            else:
-                text = transcribe(self.file_path, self.model, self.language)
-            self.done.emit(text if text else "")
-        except Exception as e:
-            self.error.emit(str(e))
-        finally:
-            if self.cleanup:
-                try:
-                    os.unlink(self.file_path)
-                except OSError:
-                    pass
+        last_error = ""
+        last_retryable = False
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            if self._cancelled:
+                return
+            try:
+                text = self._transcribe_once()
+                self.done.emit(text if text else "")
+                return
+            except Exception as e:
+                last_error = str(e)
+                last_retryable = is_retryable_error(e)
+                if (
+                    attempt < self.MAX_ATTEMPTS
+                    and last_retryable
+                    and not self._cancelled
+                ):
+                    self.retry_scheduled.emit(attempt + 1, self.MAX_ATTEMPTS)
+                    self._sleep(self.RETRY_DELAYS[attempt - 1])
+                    continue
+                break
+
+        if not self._cancelled:
+            self.error.emit(last_error, last_retryable)
+
+    def _sleep(self, seconds: float) -> None:
+        """Sleep in small increments so cancel() stays responsive."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline and not self._cancelled:
+            time.sleep(0.1)
 
 
 # ── Main Application ─────────────────────────────────────────────────────────
@@ -83,6 +116,7 @@ class PromptlyApp(QObject):
     TRANSCRIBING = "transcribing"
     DONE = "done"
     ERROR = "error"
+    PAUSED = "paused"
 
     def __init__(self):
         super().__init__()
@@ -97,6 +131,16 @@ class PromptlyApp(QObject):
         self._shutdown_complete = False
         self._success_action = "Pasted"
         self._error_message = ""
+        # Cached recording awaiting transcription (RAM only — never on disk).
+        # Survives failed transcription attempts until it succeeds or the
+        # user explicitly discards it.
+        self._pending_audio: bytes | None = None
+        self._pending_meta: dict | None = None
+        self._pause_message = ""
+        # True while a manual retry of the cached audio is in flight — the
+        # overlay then renders the amber "Retrying…" state instead of the
+        # generic transcribing state.
+        self._retrying = False
 
         # Components
         self.recorder = AudioRecorder()
@@ -164,6 +208,7 @@ class PromptlyApp(QObject):
         overlay = MinimalOverlay() if style == "minimal" else Overlay()
         overlay.toggle_requested.connect(self._toggle)
         overlay.close_requested.connect(self._hide_overlay)
+        overlay.retry_requested.connect(self._retry_pending)
         return overlay
 
     def _set_overlay_style(self, style: str) -> None:
@@ -225,6 +270,7 @@ class PromptlyApp(QObject):
                 "red": QColor(220, 50, 50),
                 "blue": QColor(50, 80, 200),
                 "green": QColor(50, 180, 50),
+                "amber": QColor(240, 170, 40),
             }
             color = colors.get(color_name, QColor(140, 140, 140))
             r = 11
@@ -244,6 +290,7 @@ class PromptlyApp(QObject):
             "red": QColor(220, 50, 50),
             "blue": QColor(50, 80, 200),
             "green": QColor(50, 180, 50),
+            "amber": QColor(240, 170, 40),
         }
         color = colors.get(color_name, QColor(140, 140, 140))
 
@@ -359,7 +406,8 @@ class PromptlyApp(QObject):
     def _apply_overlay_visibility_setting(self) -> None:
         """Apply the overlay visibility preference after Settings is saved."""
         if self._overlay_auto_hide():
-            if self._state != self.RECORDING:
+            # Recording and paused states always keep the overlay visible
+            if self._state not in (self.RECORDING, self.PAUSED):
                 self.overlay.hide()
                 self._sync_overlay_tray_action()
             return
@@ -372,11 +420,16 @@ class PromptlyApp(QObject):
         if self._state == self.RECORDING:
             self.overlay.show_recording()
         elif self._state == self.TRANSCRIBING:
-            self.overlay.show_transcribing()
+            if self._retrying:
+                self.overlay.show_retrying()
+            else:
+                self.overlay.show_transcribing()
         elif self._state == self.DONE:
             self.overlay.show_done(self._success_action)
         elif self._state == self.ERROR:
             self.overlay.show_error(self._error_message)
+        elif self._state == self.PAUSED:
+            self.overlay.show_paused(self._pause_message)
         else:
             self.overlay.show_ready()
 
@@ -403,10 +456,20 @@ class PromptlyApp(QObject):
         self.overlay.activateWindow()
 
     def _hide_overlay(self) -> None:
-        """Hide the overlay. Cancels recording if active, lets transcription finish."""
+        """Hide the overlay. Cancels recording if active, lets transcription finish.
+
+        While audio is cached in the paused state, closing the overlay
+        discards that recording instead.
+        """
         if self._shutting_down:
             self.overlay.hide()
             self._sync_overlay_tray_action()
+            return
+        if self._state == self.PAUSED:
+            # ✕ while paused = discard the cached recording
+            self.overlay.hide()
+            self._sync_overlay_tray_action()
+            self._discard_pending(reason="closed overlay")
             return
         if self._state == self.RECORDING:
             # Cancel the active recording
@@ -480,6 +543,13 @@ class PromptlyApp(QObject):
             self._start_recording()
         elif self._state == self.RECORDING:
             self._stop_and_transcribe()
+        elif self._state == self.PAUSED:
+            # A cached recording is waiting — starting a new one replaces it
+            self._discard_pending(reason="new recording started")
+            self._reset_timer.stop()
+            if not self._require_api_key():
+                return
+            self._start_recording()
 
     def _start_recording(self) -> None:
         """Begin recording from the microphone."""
@@ -544,31 +614,39 @@ class PromptlyApp(QObject):
             self._show_error("No audio captured")
             return
 
-        # Save to temp WAV
-        wav_path = self.recorder.save_wav(audio)
-        if wav_path is None:
+        # Encode to in-memory WAV bytes — never written to disk, so a failed
+        # transcription can be retried without losing the recording.
+        wav_bytes = self.recorder.wav_bytes(audio)
+        if wav_bytes is None:
             self._show_error("Recording too short")
             return
 
         duration = len(audio) / self.recorder.sample_rate
         print(f"[promptly] Recorded {duration:.1f}s -> {busy_label.lower()}...")
+        self._retrying = False
 
         # Start transcription in background thread.
         # Translation is only supported by whisper-large-v3, so force it.
         model = "whisper-large-v3" if mode == "translate" else self._get_model()
         language = self._get_language()
-        self._worker = TranscriptionWorker(
-            wav_path, model, language=language, mode=mode
-        )
-        self._worker.done.connect(self._on_transcription_done)
-        self._worker.error.connect(self._on_transcription_error)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()
+        self._pending_audio = wav_bytes
+        self._pending_meta = {
+            "model": model,
+            "language": language,
+            "mode": mode,
+            "label": busy_label,
+        }
+        self._start_worker()
 
     def _on_transcription_done(self, text: str) -> None:
         """Called when transcription completes successfully."""
         if self._shutting_down:
             return
+        # The transcription round is over — success or empty result both mean
+        # the cached audio has served its purpose.
+        self._pending_audio = None
+        self._pending_meta = None
+        self._retrying = False
         if not text:
             self._show_error("No speech detected")
             return
@@ -619,11 +697,110 @@ class PromptlyApp(QObject):
         # Reset after a short delay
         self._schedule_reset(2000)
 
-    def _on_transcription_error(self, error_msg: str) -> None:
-        """Called when transcription fails."""
+    def _start_worker(self) -> None:
+        """Start a transcription worker for the pending cached audio."""
+        meta = self._pending_meta or {}
+        self._worker = TranscriptionWorker(
+            self._pending_audio,
+            meta.get("model", "whisper-large-v3-turbo"),
+            language=meta.get("language", ""),
+            mode=meta.get("mode", "transcribe"),
+        )
+        self._worker.done.connect(self._on_transcription_done)
+        self._worker.error.connect(self._on_transcription_error)
+        self._worker.retry_scheduled.connect(self._on_retry_scheduled)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+
+    def _on_retry_scheduled(self, attempt: int, max_attempts: int) -> None:
+        """Show retry progress while the worker auto-retries."""
         if self._shutting_down:
             return
+        note = f"Retrying {attempt}/{max_attempts}"
+        print(f"[promptly] {note}...")
+        self.overlay.set_busy_note(note)
+
+    def _on_transcription_error(self, error_msg: str, retryable: bool) -> None:
+        """Called when all transcription attempts failed."""
+        if self._shutting_down:
+            return
+        self._retrying = False
+        if self._pending_audio is not None and retryable:
+            # Connection-type failure — keep the audio and wait for the user
+            self._enter_paused(error_msg)
+            return
+        # Non-retryable failures (bad API key etc.) cannot benefit from
+        # waiting — surface the error immediately and drop the cache.
+        self._pending_audio = None
+        self._pending_meta = None
         self._show_error(f"Transcription failed: {error_msg}")
+
+    def _enter_paused(self, error_msg: str) -> None:
+        """Enter the paused state with the recording safely cached.
+
+        The overlay stays visible (regardless of the auto-hide setting)
+        until the user retries or discards.
+        """
+        self._reset_timer.stop()
+        self._pause_message = "Connection lost — audio saved"
+        self._state = self.PAUSED
+        self._render_overlay_state()
+        if not self.overlay.isVisible():
+            self.overlay.show()
+            self._sync_overlay_tray_action()
+        self.tray_icon.setIcon(self._create_icon("amber"))
+        self.tray_icon.setToolTip("Promptly — Connection lost, recording saved")
+        print(f"[promptly] Transcription failed after retries: {error_msg}")
+        print(
+            "[promptly] Recording kept in memory — click ↻ Retry on the "
+            "overlay once you're back online."
+        )
+        self.tray_icon.showMessage(
+            "Promptly",
+            "❌ Connection problem — your recording is saved. Fix your "
+            "connection, then click ↻ Retry on the overlay (or ✕ to discard it).",
+            QSystemTrayIcon.MessageIcon.Warning,
+            6000,
+        )
+
+    def _retry_pending(self) -> None:
+        """Retry transcribing the cached recording (the ↻ control)."""
+        if self._shutting_down or self._state != self.PAUSED:
+            return
+        if self._pending_audio is None:
+            return
+        if not self._has_api_key():
+            self.tray_icon.showMessage(
+                "Promptly",
+                "⚠️ Add your Groq API key in Settings first.",
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000,
+            )
+            return
+
+        self._state = self.TRANSCRIBING
+        self._retrying = True
+        self.overlay.show_retrying()
+        self.tray_icon.setIcon(self._create_icon("blue"))
+        self.tray_icon.setToolTip("Promptly — Retrying...")
+        print("[promptly] Retrying transcription of the saved recording...")
+        self._start_worker()
+
+    def _discard_pending(self, reason: str = "discarded") -> None:
+        """Drop the cached recording from memory and return to idle."""
+        had_audio = self._pending_audio is not None
+        size = len(self._pending_audio) if self._pending_audio else 0
+        self._pending_audio = None
+        self._pending_meta = None
+        self._retrying = False
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+        if had_audio:
+            print(
+                f"[promptly] Discarded cached recording ({size} bytes) — {reason}."
+            )
+        if self._state == self.PAUSED:
+            self._reset()
 
     def _on_worker_finished(self) -> None:
         """Finish a pending shutdown only after the network worker exits."""
@@ -658,7 +835,7 @@ class PromptlyApp(QObject):
         """Reset to idle state."""
         if self._shutting_down:
             return
-        if self._state not in (self.DONE, self.ERROR):
+        if self._state not in (self.DONE, self.ERROR, self.PAUSED):
             return
         self._state = self.IDLE
         self._error_message = ""
@@ -702,12 +879,12 @@ class PromptlyApp(QObject):
         self.tray_icon.setToolTip(f"Promptly — {busy_label} (test)...")
         self.test_action.setEnabled(False)
 
-        # Transcribe without deleting the user's file (cleanup=False).
+        # Transcribe without modifying the user's file.
         # Translation is only supported by whisper-large-v3, so force it.
         model = "whisper-large-v3" if mode == "translate" else self._get_model()
         language = self._get_language()
         self._worker = TranscriptionWorker(
-            file_path, model, language=language, mode=mode, cleanup=False
+            file_path, model, language=language, mode=mode
         )
         self._worker.done.connect(self._on_transcription_done)
         self._worker.error.connect(self._on_transcription_error)
@@ -852,6 +1029,8 @@ class PromptlyApp(QObject):
         self.tray_icon.hide()
 
         if self._worker is not None and self._worker.isRunning():
+            # Stop retry loops promptly; the worker exits between attempts
+            self._worker.cancel()
             return
 
         self._finish_shutdown()

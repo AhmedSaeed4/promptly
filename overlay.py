@@ -4,7 +4,7 @@ import math
 import os
 import sys
 
-from PyQt6.QtCore import QRectF, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -111,12 +111,15 @@ class Overlay(QWidget):
 
     toggle_requested = pyqtSignal()
     close_requested = pyqtSignal()
+    retry_requested = pyqtSignal()
 
     READY = "ready"
     RECORDING = "recording"
     TRANSCRIBING = "transcribing"
     DONE = "done"
     ERROR = "error"
+    PAUSED = "paused"
+    RETRYING = "retrying"
 
     # ── Color Palette (Game Bar inspired) ─────────────────────────────────────
 
@@ -126,6 +129,7 @@ class Overlay(QWidget):
     BG_TRANSCRIBING = "rgba(30, 35, 50, 0.94)"
     BG_DONE = "rgba(25, 45, 30, 0.94)"
     BG_ERROR = "rgba(45, 25, 25, 0.94)"
+    BG_PAUSED = "rgba(52, 40, 18, 0.94)"
 
     # Borders — subtle, barely visible
     BORDER_READY = "rgba(255, 255, 255, 0.06)"
@@ -133,6 +137,7 @@ class Overlay(QWidget):
     BORDER_TRANSCRIBING = "rgba(100, 150, 239, 0.15)"
     BORDER_DONE = "rgba(100, 200, 100, 0.15)"
     BORDER_ERROR = "rgba(239, 100, 100, 0.2)"
+    BORDER_PAUSED = "rgba(239, 180, 100, 0.2)"
 
     # Bottom accent line — white/light
     BOTTOM_LINE_READY = "rgba(255, 255, 255, 0.25)"
@@ -140,6 +145,7 @@ class Overlay(QWidget):
     BOTTOM_LINE_TRANSCRIBING = "rgba(100, 150, 239, 0.5)"
     BOTTOM_LINE_DONE = "rgba(100, 200, 100, 0.5)"
     BOTTOM_LINE_ERROR = "rgba(239, 100, 100, 0.5)"
+    BOTTOM_LINE_PAUSED = "rgba(239, 180, 100, 0.55)"
 
     # Button styles — rounded, subtle, minimal
     _BTN_READY = """
@@ -178,6 +184,25 @@ class Overlay(QWidget):
         }
         QPushButton:pressed {
             background: rgba(239, 100, 100, 0.2);
+        }
+    """
+
+    _BTN_RETRY = """
+        QPushButton {
+            background: rgba(239, 180, 100, 0.25);
+            color: rgba(255, 235, 200, 0.95);
+            border: 1px solid rgba(239, 180, 100, 0.45);
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 12px;
+            min-width: 56px;
+        }
+        QPushButton:hover {
+            background: rgba(239, 180, 100, 0.38);
+        }
+        QPushButton:pressed {
+            background: rgba(239, 180, 100, 0.2);
         }
     """
 
@@ -283,6 +308,15 @@ class Overlay(QWidget):
         self.action_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.action_button.clicked.connect(self._on_button_click)
 
+        # Retry button (↻ Retry) — visible in the paused/retrying states when
+        # a cached recording is waiting for the connection to come back.
+        self.retry_button = QPushButton("↻ Retry")
+        self.retry_button.setFixedSize(64, 28)
+        self.retry_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.retry_button.setStyleSheet(self._BTN_RETRY)
+        self.retry_button.hide()
+        self.retry_button.clicked.connect(self.retry_requested.emit)
+
         # Close button (×)
         self.close_button = QPushButton("×")
         self.close_button.setFixedSize(24, 24)
@@ -312,6 +346,7 @@ class Overlay(QWidget):
         content_layout.addWidget(self.hint_label)
         content_layout.addStretch()
         content_layout.addWidget(self.action_button)
+        content_layout.addWidget(self.retry_button)
         content_layout.addWidget(self.close_button)
 
         # ── Bottom Accent Line ───────────────────────────────────────────────
@@ -388,6 +423,7 @@ class Overlay(QWidget):
         hint: str,
         btn_text: str,
         btn_enabled: bool = True,
+        show_retry: bool = False,
     ) -> None:
         """Apply visual state."""
         self.setStyleSheet(f"""
@@ -406,6 +442,9 @@ class Overlay(QWidget):
         self.action_button.setText(btn_text)
         self.action_button.setStyleSheet(btn_style)
         self.action_button.setEnabled(btn_enabled)
+        # Paused state swaps the action button for the retry button
+        self.retry_button.setVisible(show_retry)
+        self.action_button.setVisible(not show_retry)
 
         # Force an immediate repaint so state changes are shown without
         # having to hover over the overlay (translucent frameless windows
@@ -455,6 +494,10 @@ class Overlay(QWidget):
             self.show_done(self._success_text)
         elif self._visual_state == self.ERROR:
             self.show_error(self._error_message)
+        elif self._visual_state == self.PAUSED:
+            self.show_paused(self._error_message)
+        elif self._visual_state == self.RETRYING:
+            self.show_retrying()
         else:
             self.show_ready()
 
@@ -566,6 +609,52 @@ class Overlay(QWidget):
             btn_enabled=False,
         )
 
+    def set_busy_note(self, note: str) -> None:
+        """Show a transient note (e.g. "Retrying 2/3") while transcribing."""
+        if self._visual_state != self.TRANSCRIBING or not note:
+            return
+        self.text_label.setText(note)
+        self._force_repaint()
+
+    def show_paused(self, message: str = "Connection lost") -> None:
+        """Paused state — amber accent, retry button, waits for the user.
+
+        Used when a cached recording could not be transcribed and is waiting
+        for the user to either retry or discard it.
+        """
+        self._visual_state = self.PAUSED
+        self._error_message = message
+        # Truncate long messages
+        display_text = message if len(message) < 24 else message[:21] + "..."
+        self._apply_style(
+            bg=self.BG_PAUSED,
+            border=self.BORDER_PAUSED,
+            bottom_line=self.BOTTOM_LINE_PAUSED,
+            btn_style=self._BTN_READY,
+            icon="⚠",
+            text=display_text,
+            hint="waiting",
+            btn_text="⏵",
+            show_retry=True,
+        )
+
+    def show_retrying(self) -> None:
+        """Retrying state — stays amber with a "Retrying…" label so the user
+        can see their retry click registered and an attempt is in flight."""
+        self._visual_state = self.RETRYING
+        self._hide_recording_widgets()
+        self._apply_style(
+            bg=self.BG_PAUSED,
+            border=self.BORDER_PAUSED,
+            bottom_line=self.BOTTOM_LINE_PAUSED,
+            btn_style=self._BTN_READY,
+            icon="↻",
+            text="Retrying…",
+            hint="...",
+            btn_text="⏵",
+            show_retry=True,
+        )
+
     def show_done(self, text: str = "Pasted") -> None:
         """Done state — subtle green accent."""
         self._visual_state = self.DONE
@@ -609,12 +698,15 @@ class MinimalOverlay(QWidget):
 
     toggle_requested = pyqtSignal()
     close_requested = pyqtSignal()
+    retry_requested = pyqtSignal()
 
     READY = "ready"
     RECORDING = "recording"
     TRANSCRIBING = "transcribing"
     DONE = "done"
     ERROR = "error"
+    PAUSED = "paused"
+    RETRYING = "retrying"
 
     WIDTH = 116
     HEIGHT = 29
@@ -645,6 +737,7 @@ class MinimalOverlay(QWidget):
         self._visual_state = self.READY
         self._success_text = "Pasted"
         self._error_message = ""
+        self._paused_message = ""
         self._elapsed = 0.0
         self._level = 0.0
         self._phase = 0.0
@@ -667,7 +760,8 @@ class MinimalOverlay(QWidget):
 
     def _set_state(self, state: str) -> None:
         self._visual_state = state
-        if state == self.RECORDING:
+        if state in (self.RECORDING, self.RETRYING):
+            # RETRYING animates the orbiting arc around the retry control
             self._wave_timer.start()
         else:
             self._wave_timer.stop()
@@ -687,6 +781,10 @@ class MinimalOverlay(QWidget):
             self.show_done(self._success_text)
         elif self._visual_state == self.ERROR:
             self.show_error(self._error_message)
+        elif self._visual_state == self.PAUSED:
+            self.show_paused(self._paused_message)
+        elif self._visual_state == self.RETRYING:
+            self.show_retrying()
         else:
             self.show_ready()
 
@@ -728,6 +826,24 @@ class MinimalOverlay(QWidget):
         self._error_message = message
         self._set_state(self.ERROR)
 
+    def set_busy_note(self, note: str) -> None:
+        """Interface parity with the Classic overlay — the pill keeps its
+        waveform during auto-retries and only shows the pause message once
+        transcription has fully failed."""
+        del note
+
+    def show_paused(self, message: str = "Connection lost") -> None:
+        """Paused state — the center swaps the timer/wave for a message,
+        the tick control becomes a retry control, close discards."""
+        self._paused_message = message
+        self._set_state(self.PAUSED)
+
+    def show_retrying(self) -> None:
+        """Retrying state — center shows "Retrying…" and an arc orbits the
+        retry control so the user can see the attempt is running."""
+        self._paused_message = "Retrying…"
+        self._set_state(self.RETRYING)
+
     def _border_alpha(self) -> int:
         return {
             self.READY: 72,
@@ -735,6 +851,8 @@ class MinimalOverlay(QWidget):
             self.TRANSCRIBING: 72,
             self.DONE: 148,
             self.ERROR: 107,
+            self.PAUSED: 148,
+            self.RETRYING: 148,
         }.get(self._visual_state, 72)
 
     def _format_elapsed(self) -> str:
@@ -750,6 +868,9 @@ class MinimalOverlay(QWidget):
         return middle_left + (middle_width - content_width) / 2, show_timer
 
     def _paint_wave(self, painter: QPainter) -> None:
+        if self._visual_state in (self.PAUSED, self.RETRYING):
+            self._paint_center_message(painter)
+            return
         start_x, show_timer = self._wave_geometry()
         center_y = self.PILL_Y + self.PILL_HEIGHT / 2
         profiles = (0.45, 0.7, 0.9, 1.0, 0.9, 0.7, 0.45)
@@ -785,6 +906,25 @@ class MinimalOverlay(QWidget):
                 self._format_elapsed(),
             )
 
+    def _paint_center_message(self, painter: QPainter) -> None:
+        """Draw the paused message in place of the waveform/timer."""
+        rect = QRectF(
+            self.PILL_X + 26,
+            self.PILL_Y,
+            self.PILL_WIDTH - 52,
+            self.PILL_HEIGHT,
+        )
+        font = painter.font()
+        font.setPixelSize(9)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 235, 200, 220))
+        elided = painter.fontMetrics().elidedText(
+            self._paused_message or "Connection lost",
+            Qt.TextElideMode.ElideRight,
+            int(rect.width()),
+        )
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, elided)
+
     def _paint_close(self, painter: QPainter) -> None:
         center_x = self.PILL_X + 14
         center_y = self.PILL_Y + self.PILL_HEIGHT / 2
@@ -809,6 +949,23 @@ class MinimalOverlay(QWidget):
         painter.setBrush(QColor(255, 255, 255, 20))
         painter.setPen(QPen(QColor(255, 255, 255, 107), 1))
         painter.drawEllipse(circle)
+        if self._visual_state == self.PAUSED:
+            # The tick transforms into a retry glyph while audio is cached
+            self._paint_retry(painter, center_x, center_y)
+            return
+        if self._visual_state == self.RETRYING:
+            # Retry glyph + an arc orbiting the control while the attempt runs
+            self._paint_retry(painter, center_x, center_y)
+            orbit = QRectF(center_x - 12.0, center_y - 12.0, 24, 24)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(255, 235, 200, 60), 1.4))
+            painter.drawEllipse(orbit)
+            sweep = QPen(QColor(255, 235, 200, 230), 1.6)
+            sweep.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(sweep)
+            start_angle = int((self._phase * 40.0) % 360) * 16
+            painter.drawArc(orbit, start_angle, -100 * 16)
+            return
         pen = QPen(QColor(255, 255, 255, 230), 1.2)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -818,6 +975,40 @@ class MinimalOverlay(QWidget):
         path.lineTo(center_x - 0.83, center_y + 1.67)
         path.lineTo(center_x + 2.5, center_y - 2.08)
         painter.drawPath(path)
+
+    def _paint_retry(self, painter: QPainter, center_x: float, center_y: float) -> None:
+        """Draw a circular-arrow ↻ glyph inside the right-hand control."""
+        radius = 4.6
+        start_deg, end_deg = 80.0, 364.0
+        points: list[QPointF] = []
+        angle = start_deg
+        while angle <= end_deg:
+            rad = math.radians(angle)
+            points.append(
+                QPointF(
+                    center_x + radius * math.cos(rad),
+                    center_y - radius * math.sin(rad),
+                )
+            )
+            angle += 16.0
+
+        pen = QPen(QColor(255, 255, 255, 230), 1.3)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPolyline(points)
+
+        # Arrowhead at the arc's end, pointing along the direction of travel
+        rad_end = math.radians(end_deg)
+        tangent = QPointF(-math.sin(rad_end), -math.cos(rad_end))
+        tip = points[-1] + tangent * 3.0
+        normal = QPointF(-tangent.y(), tangent.x())
+        painter.setBrush(QColor(255, 255, 255, 230))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(
+            [tip, points[-1] - normal * 1.5, points[-1] + normal * 1.5]
+        )
 
     def paintEvent(self, event) -> None:
         """Paint the monochrome pill and its state-dependent waveform."""
@@ -872,6 +1063,25 @@ class MinimalOverlay(QWidget):
             return
 
         position = event.position().toPoint()
+        if self._visual_state == self.PAUSED:
+            # Paused: ✕ discards, the retry control retries, middle does nothing
+            in_close_button = (
+                self.PILL_X + 4 <= position.x() <= self.PILL_X + 24
+                and self.PILL_Y + 5 <= position.y() <= self.PILL_Y + 24
+            )
+            if in_close_button:
+                self.close_requested.emit()
+                event.accept()
+                return
+            in_retry_button = (
+                position.x() >= self.PILL_X + self.PILL_WIDTH - 24
+                and self.PILL_Y + 5 <= position.y() <= self.PILL_Y + 24
+            )
+            if in_retry_button:
+                self.retry_requested.emit()
+            event.accept()
+            return
+
         in_close_button = (
             self.PILL_X + 4 <= position.x() <= self.PILL_X + 24
             and self.PILL_Y + 5 <= position.y() <= self.PILL_Y + 24
