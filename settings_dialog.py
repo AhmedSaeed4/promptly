@@ -49,6 +49,7 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QMessageBox,
     QVBoxLayout,
 )
@@ -60,7 +61,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Promptly — Settings")
-        self.setFixedSize(420, 500)
+        self.setFixedSize(420, 620)
         self.setModal(True)
 
         self._settings = QSettings("Promptly", "Promptly")
@@ -120,6 +121,22 @@ class SettingsDialog(QDialog):
             "raw transcript is used instead."
         )
         form.addRow("Text polish:", self.polish_check)
+
+        # Personal vocabulary — tricky names/brands/jargon the listener
+        # mishears (e.g. "Claude Code" -> "cloud code"). One term per line.
+        self.vocab_input = QPlainTextEdit()
+        self.vocab_input.setPlaceholderText(
+            "Claude Code\nGroq\nAisha\nKubernetes"
+        )
+        self.vocab_input.setToolTip(
+            "Words the transcription often gets wrong — names, brands, jargon. "
+            "One term per line. They are used as a spelling hint while "
+            "listening and taught to the AI cleanup, which only fixes a word "
+            "when the sentence shows you meant that term — a genuine use of a "
+            "similar-sounding word is never replaced."
+        )
+        self.vocab_input.setMaximumHeight(88)
+        form.addRow("My words:", self.vocab_input)
 
         # Overlay style
         self.overlay_style_combo = QComboBox()
@@ -203,6 +220,9 @@ class SettingsDialog(QDialog):
         polish = self._settings.value("polish_text", True, type=bool)
         self.polish_check.setChecked(polish)
 
+        vocab = self._settings.value("custom_vocab", "") or ""
+        self.vocab_input.setPlainText(vocab)
+
         overlay_style = self._settings.value("overlay_style", "classic") or "classic"
         index = self.overlay_style_combo.findData(overlay_style)
         self.overlay_style_combo.setCurrentIndex(index if index >= 0 else 0)
@@ -224,6 +244,12 @@ class SettingsDialog(QDialog):
         language = self.language_combo.currentData() or ""
         auto_paste = self.auto_paste_check.isChecked()
         polish_text = self.polish_check.isChecked()
+        # One term per line, trimmed, blanks dropped — stored as the raw
+        # newline-joined text so it round-trips exactly what the user sees.
+        vocab = "\n".join(
+            line.strip() for line in self.vocab_input.toPlainText().splitlines()
+            if line.strip()
+        )
         overlay_style = self.overlay_style_combo.currentData() or "classic"
         overlay_auto_hide = self.overlay_auto_hide_check.isChecked()
 
@@ -251,6 +277,7 @@ class SettingsDialog(QDialog):
         self._settings.setValue("language", language)
         self._settings.setValue("auto_paste", auto_paste)
         self._settings.setValue("polish_text", polish_text)
+        self._settings.setValue("custom_vocab", vocab)
         self._settings.setValue("overlay_style", overlay_style)
         self._settings.setValue("overlay_auto_hide", overlay_auto_hide)
         self._settings.setValue("hotkey", hotkey_text)
