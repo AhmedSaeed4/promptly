@@ -12,6 +12,7 @@ Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - **Desktop app** — lives in your system tray. Click the tray icon to open the overlay, use it, close it when you're done.
 - **Auto-paste** — transcribed text is automatically pasted into the active window via Ctrl+V, and also copied to the clipboard so you can paste it again anywhere.
 - **AI text polish** — before pasting, a fast Groq AI model cleans up the transcript: grammar, punctuation, filler words ("um", "I mean"), and broken sentences — without changing the meaning or language. Toggle it from Settings; if the AI is unreachable, the raw transcript is pasted instead.
+- **Personal word list** — add tricky terms (names, brands, jargon) in Settings, one per line. They act as a spelling hint while listening and teach the AI cleanup to fix mishearings (e.g. "cloud code" → "Claude Code") — while genuine uses of similar-sounding words ("save it to the cloud") are never touched.
 - **Two overlay designs** — choose between the existing Xbox Game Bar-style bar or a compact black-and-white pill from Settings. Both show the current state and are draggable.
 - **System tray icon** — lives in your system tray with a context menu. Icon color changes to reflect the current state (gray = idle, red = recording, blue = transcribing, green = done).
 - **First-launch setup** — on first run, the Settings dialog opens automatically so you can enter your API key. No manual setup needed.

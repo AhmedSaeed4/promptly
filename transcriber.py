@@ -85,10 +85,26 @@ def _upload_source(source: str | bytes):
     return source
 
 
+def vocab_prompt(vocab: list[str]) -> str:
+    """Build the Whisper spelling hint from the user's word list.
+
+    Whisper's `prompt` parameter biases the model toward these spellings
+    (officially: "specify how to spell unfamiliar words"). The budget is
+    224 tokens, so the list is capped — the polish step corrects anything
+    the hint could not fit.
+    """
+    terms = [t.strip() for t in vocab if t and t.strip()]
+    if not terms:
+        return ""
+    hint = "Glossary of terms the user may say, with exact spellings: " + "; ".join(terms)
+    return hint[:700]
+
+
 def transcribe(
     source: str | bytes,
     model: str = "whisper-large-v3-turbo",
     language: str = "",
+    vocab: list[str] | None = None,
 ) -> str:
     """Send audio to Groq Whisper and return the transcribed text.
 
@@ -98,17 +114,21 @@ def transcribe(
         model: Groq model name. Defaults to the fast turbo model.
         language: Whisper language code (e.g. "hi", "ur"). Empty string
             means auto-detect.
+        vocab: The user's custom word list, used as a spelling hint so
+            names and jargon are heard correctly.
 
     Returns:
         Transcribed text, stripped of leading/trailing whitespace.
     """
     client = get_client()
 
+    prompt = vocab_prompt(vocab or [])
     result = client.audio.transcriptions.create(
         file=_upload_source(source),
         model=model,
         response_format="text",
         **({"language": language} if language else {}),
+        **({"prompt": prompt} if prompt else {}),
     )
 
     return result.strip() if result else ""

@@ -46,6 +46,7 @@ class TranscriptionWorker(QThread):
         language: str = "",
         mode: str = "transcribe",
         polish: bool = False,
+        vocab: list[str] | None = None,
     ):
         super().__init__()
         self.source = source  # file path (test mode) or WAV bytes (mic)
@@ -53,6 +54,7 @@ class TranscriptionWorker(QThread):
         self.language = language
         self.mode = mode  # "transcribe" (same language) or "translate" (to English)
         self.polish = polish  # clean the transcript with the AI polisher
+        self.vocab = vocab or []  # user's custom words — listening hint + polish
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -62,7 +64,7 @@ class TranscriptionWorker(QThread):
     def _transcribe_once(self) -> str:
         if self.mode == "translate":
             return translate_to_english(self.source, self.model)
-        return transcribe(self.source, self.model, self.language)
+        return transcribe(self.source, self.model, self.language, vocab=self.vocab)
 
     def run(self) -> None:
         import transcriber as _transcriber
@@ -79,7 +81,7 @@ class TranscriptionWorker(QThread):
                 if text and self.polish:
                     self.polish_started.emit()
                     try:
-                        polished = polish_text(text)
+                        polished = polish_text(text, vocab=self.vocab)
                         if polished:
                             text = polished
                     except Exception as polish_error:
@@ -650,6 +652,7 @@ class PromptlyApp(QObject):
             "mode": mode,
             "label": busy_label,
             "polish": self._get_polish(),
+            "vocab": self._get_vocab(),
         }
         self._start_worker()
 
@@ -721,6 +724,7 @@ class PromptlyApp(QObject):
             language=meta.get("language", ""),
             mode=meta.get("mode", "transcribe"),
             polish=meta.get("polish", True),
+            vocab=meta.get("vocab") or [],
         )
         self._worker.done.connect(self._on_transcription_done)
         self._worker.error.connect(self._on_transcription_error)
@@ -909,7 +913,7 @@ class PromptlyApp(QObject):
         language = self._get_language()
         self._worker = TranscriptionWorker(
             file_path, model, language=language, mode=mode,
-            polish=self._get_polish(),
+            polish=self._get_polish(), vocab=self._get_vocab(),
         )
         self._worker.done.connect(self._on_transcription_done)
         self._worker.error.connect(self._on_transcription_error)
@@ -948,6 +952,14 @@ class PromptlyApp(QObject):
 
         settings = QSettings("Promptly", "Promptly")
         return settings.value("polish_text", True, type=bool)
+
+    def _get_vocab(self) -> list[str]:
+        """Get the user's custom word list from settings (one term per line)."""
+        from PyQt6.QtCore import QSettings
+
+        settings = QSettings("Promptly", "Promptly")
+        raw = str(settings.value("custom_vocab", "") or "")
+        return [line.strip() for line in raw.splitlines() if line.strip()]
 
     def _replace_hotkey(self, new_text: str, parsed: tuple[int, int]) -> None:
         """Replace the registered hotkey transactionally, restoring it on failure."""
