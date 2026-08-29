@@ -11,12 +11,13 @@ Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - **Configurable global hotkey** — press to start recording, press again to stop. Works anywhere without admin privileges. The default is Ctrl+Alt+V; conflicts are reported and the previous working hotkey is restored.
 - **Desktop app** — lives in your system tray. Click the tray icon to open the overlay, use it, close it when you're done.
 - **Auto-paste** — transcribed text is automatically pasted into the active window via Ctrl+V, and also copied to the clipboard so you can paste it again anywhere.
+- **AI text polish** — before pasting, a fast Groq AI model cleans up the transcript: grammar, punctuation, filler words ("um", "I mean"), and broken sentences — without changing the meaning or language. Toggle it from Settings; if the AI is unreachable, the raw transcript is pasted instead.
 - **Two overlay designs** — choose between the existing Xbox Game Bar-style bar or a compact black-and-white pill from Settings. Both show the current state and are draggable.
 - **System tray icon** — lives in your system tray with a context menu. Icon color changes to reflect the current state (gray = idle, red = recording, blue = transcribing, green = done).
 - **First-launch setup** — on first run, the Settings dialog opens automatically so you can enter your API key. No manual setup needed.
 - **Background transcription** — transcription runs in a background thread so the UI never freezes.
 - **Test mode** — transcribe an audio or video file without needing a microphone. Supports WAV, MP3, M4A, OGG, FLAC, WEBM, MP4, AVI, MKV, MOV, WMV, TS.
-- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, hotkey, overlay design, and overlay visibility. Settings are persisted through QSettings in the Windows registry.
+- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, AI text polish, hotkey, overlay design, and overlay visibility. Settings are persisted through QSettings in the Windows registry.
 - **Error handling** — friendly error messages for missing microphone, recordings that are too short, no speech detected, and API failures.
 - **Portable** — single `.exe` file, no installation required. Works on any Windows 64-bit laptop.
 

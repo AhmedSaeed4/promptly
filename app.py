@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QDialog, QMenu, QSystemTr
 from hotkey import MOD_ALT, MOD_CONTROL, VK_V, GlobalHotkey, parse_hotkey
 from overlay import MinimalOverlay, Overlay
 from paster import copy_to_clipboard, paste_into_terminal
+from polisher import polish as polish_text
 from recorder import AudioRecorder
 from settings_dialog import SettingsDialog
 from transcriber import is_retryable_error, transcribe, translate_to_english
@@ -33,6 +34,7 @@ class TranscriptionWorker(QThread):
     done = pyqtSignal(str)
     error = pyqtSignal(str, bool)  # message, retryable?
     retry_scheduled = pyqtSignal(int, int)  # next attempt, max attempts
+    polish_started = pyqtSignal()  # transcript succeeded, AI cleanup is running
 
     MAX_ATTEMPTS = 3
     RETRY_DELAYS = (2.0, 4.0)  # seconds before the 2nd / 3rd attempt
@@ -43,12 +45,14 @@ class TranscriptionWorker(QThread):
         model: str,
         language: str = "",
         mode: str = "transcribe",
+        polish: bool = False,
     ):
         super().__init__()
         self.source = source  # file path (test mode) or WAV bytes (mic)
         self.model = model
         self.language = language
         self.mode = mode  # "transcribe" (same language) or "translate" (to English)
+        self.polish = polish  # clean the transcript with the AI polisher
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -72,6 +76,16 @@ class TranscriptionWorker(QThread):
                 return
             try:
                 text = self._transcribe_once()
+                if text and self.polish:
+                    self.polish_started.emit()
+                    try:
+                        polished = polish_text(text)
+                        if polished:
+                            text = polished
+                    except Exception as polish_error:
+                        # A polish failure must never lose the transcript —
+                        # fall back to the raw Whisper output.
+                        print(f"[promptly] Polish failed, using raw text: {polish_error}")
                 self.done.emit(text if text else "")
                 return
             except Exception as e:
@@ -635,6 +649,7 @@ class PromptlyApp(QObject):
             "language": language,
             "mode": mode,
             "label": busy_label,
+            "polish": self._get_polish(),
         }
         self._start_worker()
 
@@ -705,10 +720,12 @@ class PromptlyApp(QObject):
             meta.get("model", "whisper-large-v3-turbo"),
             language=meta.get("language", ""),
             mode=meta.get("mode", "transcribe"),
+            polish=meta.get("polish", True),
         )
         self._worker.done.connect(self._on_transcription_done)
         self._worker.error.connect(self._on_transcription_error)
         self._worker.retry_scheduled.connect(self._on_retry_scheduled)
+        self._worker.polish_started.connect(self._on_polish_started)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
@@ -719,6 +736,13 @@ class PromptlyApp(QObject):
         note = f"Retrying {attempt}/{max_attempts}"
         print(f"[promptly] {note}...")
         self.overlay.set_busy_note(note)
+
+    def _on_polish_started(self) -> None:
+        """Show the AI cleanup step while the worker polishes the transcript."""
+        if self._shutting_down:
+            return
+        print("[promptly] Polishing transcript...")
+        self.overlay.set_busy_note("Polishing…")
 
     def _on_transcription_error(self, error_msg: str, retryable: bool) -> None:
         """Called when all transcription attempts failed."""
@@ -884,10 +908,12 @@ class PromptlyApp(QObject):
         model = "whisper-large-v3" if mode == "translate" else self._get_model()
         language = self._get_language()
         self._worker = TranscriptionWorker(
-            file_path, model, language=language, mode=mode
+            file_path, model, language=language, mode=mode,
+            polish=self._get_polish(),
         )
         self._worker.done.connect(self._on_transcription_done)
         self._worker.error.connect(self._on_transcription_error)
+        self._worker.polish_started.connect(self._on_polish_started)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
@@ -915,6 +941,13 @@ class PromptlyApp(QObject):
         settings = QSettings("Promptly", "Promptly")
         mode = settings.value("mode", "transcribe") or "transcribe"
         return str(mode)
+
+    def _get_polish(self) -> bool:
+        """Get the AI text-polish preference (default on)."""
+        from PyQt6.QtCore import QSettings
+
+        settings = QSettings("Promptly", "Promptly")
+        return settings.value("polish_text", True, type=bool)
 
     def _replace_hotkey(self, new_text: str, parsed: tuple[int, int]) -> None:
         """Replace the registered hotkey transactionally, restoring it on failure."""

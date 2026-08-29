@@ -26,5 +26,8 @@ dist-onefile/
 # Local demo/preview files (testing only — never push)
 demo-*.html
 
+# Local test scratch folder (never push)
+test-polish/
+
 # Local AI-tool settings
 .claude/
