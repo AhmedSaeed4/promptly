@@ -60,7 +60,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Promptly — Settings")
-        self.setFixedSize(420, 470)
+        self.setFixedSize(420, 500)
         self.setModal(True)
 
         self._settings = QSettings("Promptly", "Promptly")
@@ -110,6 +110,16 @@ class SettingsDialog(QDialog):
         self.auto_paste_check = QCheckBox("Automatically paste into active terminal")
         self.auto_paste_check.setChecked(True)
         form.addRow("", self.auto_paste_check)
+
+        # AI text polish
+        self.polish_check = QCheckBox("Polish text with AI (fix grammar & sentences)")
+        self.polish_check.setToolTip(
+            "After transcription, a fast Groq AI model cleans up the text — "
+            "grammar, punctuation, filler words — before pasting. The meaning "
+            "and language are never changed. If the AI is unreachable, the "
+            "raw transcript is used instead."
+        )
+        form.addRow("Text polish:", self.polish_check)
 
         # Overlay style
         self.overlay_style_combo = QComboBox()
@@ -190,6 +200,9 @@ class SettingsDialog(QDialog):
         auto_paste = self._settings.value("auto_paste", True, type=bool)
         self.auto_paste_check.setChecked(auto_paste)
 
+        polish = self._settings.value("polish_text", True, type=bool)
+        self.polish_check.setChecked(polish)
+
         overlay_style = self._settings.value("overlay_style", "classic") or "classic"
         index = self.overlay_style_combo.findData(overlay_style)
         self.overlay_style_combo.setCurrentIndex(index if index >= 0 else 0)
@@ -210,6 +223,7 @@ class SettingsDialog(QDialog):
         mode = self.mode_combo.currentData() or "transcribe"
         language = self.language_combo.currentData() or ""
         auto_paste = self.auto_paste_check.isChecked()
+        polish_text = self.polish_check.isChecked()
         overlay_style = self.overlay_style_combo.currentData() or "classic"
         overlay_auto_hide = self.overlay_auto_hide_check.isChecked()
 
@@ -236,6 +250,7 @@ class SettingsDialog(QDialog):
         self._settings.setValue("mode", mode)
         self._settings.setValue("language", language)
         self._settings.setValue("auto_paste", auto_paste)
+        self._settings.setValue("polish_text", polish_text)
         self._settings.setValue("overlay_style", overlay_style)
         self._settings.setValue("overlay_auto_hide", overlay_auto_hide)
         self._settings.setValue("hotkey", hotkey_text)
