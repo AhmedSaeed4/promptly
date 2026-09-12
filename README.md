@@ -14,11 +14,12 @@ Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - **AI text polish** — before pasting, a fast Groq AI model cleans up the transcript: grammar, punctuation, filler words ("um", "I mean"), and broken sentences — without changing the meaning or language. Toggle it from Settings; if the AI is unreachable, the raw transcript is pasted instead.
 - **Personal word list** — add tricky terms (names, brands, jargon) in Settings, one per line. They act as a spelling hint while listening and teach the AI cleanup to fix mishearings (e.g. "cloud code" → "Claude Code") — while genuine uses of similar-sounding words ("save it to the cloud") are never touched.
 - **Two overlay designs** — choose between the existing Xbox Game Bar-style bar or a compact black-and-white pill from Settings. Both show the current state and are draggable.
+- **Launch with Windows** — Promptly adds itself to Windows' startup list (ON by default), so the tray app — and your hotkeys — are ready right after sign-in, no double-click needed. Turn it off anytime in Settings.
 - **System tray icon** — lives in your system tray with a context menu. Icon color changes to reflect the current state (gray = idle, red = recording, blue = transcribing, green = done).
 - **First-launch setup** — on first run, the Settings dialog opens automatically so you can enter your API key. No manual setup needed.
 - **Background transcription** — transcription runs in a background thread so the UI never freezes.
 - **Test mode** — transcribe an audio or video file without needing a microphone. Supports WAV, MP3, M4A, OGG, FLAC, WEBM, MP4, AVI, MKV, MOV, WMV, TS.
-- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, AI text polish, hotkey, overlay design, and overlay visibility. Settings are persisted through QSettings in the Windows registry.
+- **Settings dialog** — configure your Groq API key, language, transcription mode, model, auto-paste, AI text polish, hotkey, overlay design, overlay visibility, and Windows startup. Settings are persisted through QSettings in the Windows registry.
 - **Error handling** — friendly error messages for missing microphone, recordings that are too short, no speech detected, and API failures.
 - **Portable** — single `.exe` file, no installation required. Works on any Windows 64-bit laptop.
 
@@ -215,6 +216,7 @@ Right-click the tray icon to access:
 | Hotkey | Any supported modified key combination | Ctrl+Alt+V |
 | Overlay style | Classic (Game Bar) / Minimal pill | Classic |
 | Overlay visibility | Always visible / Auto-hide after transcription | Always visible |
+| Windows startup | Start Promptly automatically when Windows starts | On |
 
 Settings are saved through QSettings in the Windows registry.
 

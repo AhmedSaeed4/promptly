@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QKeySequence
 
 from hotkey import parse_hotkey
+from startup import sync as sync_startup
 
 # Language options — empty value means "auto-detect" (Whisper figures it out).
 # Keys are Whisper language codes.
@@ -153,6 +154,17 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Overlay visibility:", self.overlay_auto_hide_check)
 
+        # Launch with Windows — the tray app (and hotkeys) start at sign-in
+        self.auto_start_check = QCheckBox(
+            "Start Promptly automatically when Windows starts"
+        )
+        self.auto_start_check.setToolTip(
+            "Adds Promptly to Windows' startup list, so the tray app — and "
+            "your hotkeys — are ready right after every restart, no "
+            "double-click needed. Uncheck to remove it from the list again."
+        )
+        form.addRow("Windows startup:", self.auto_start_check)
+
         # Hotkey (user-selectable, press the combo in the box)
         self.hotkey_edit = QKeySequenceEdit(QKeySequence("Ctrl+Alt+V"))
         self.hotkey_edit.setMaximumSequenceLength(1)
@@ -232,6 +244,9 @@ class SettingsDialog(QDialog):
         )
         self.overlay_auto_hide_check.setChecked(overlay_auto_hide)
 
+        auto_start = self._settings.value("auto_start", True, type=bool)
+        self.auto_start_check.setChecked(auto_start)
+
         hotkey = self._settings.value("hotkey", "") or ""
         if hotkey:
             self.hotkey_edit.setKeySequence(QKeySequence(hotkey))
@@ -252,6 +267,7 @@ class SettingsDialog(QDialog):
         )
         overlay_style = self.overlay_style_combo.currentData() or "classic"
         overlay_auto_hide = self.overlay_auto_hide_check.isChecked()
+        auto_start = self.auto_start_check.isChecked()
 
         if not api_key:
             QMessageBox.warning(
@@ -280,7 +296,12 @@ class SettingsDialog(QDialog):
         self._settings.setValue("custom_vocab", vocab)
         self._settings.setValue("overlay_style", overlay_style)
         self._settings.setValue("overlay_auto_hide", overlay_auto_hide)
+        self._settings.setValue("auto_start", auto_start)
         self._settings.setValue("hotkey", hotkey_text)
+
+        # Apply the startup-list change right away (a no-op for dev runs,
+        # which never touch the real startup list).
+        sync_startup(auto_start)
 
         self.accept()
 
