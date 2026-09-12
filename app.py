@@ -18,6 +18,7 @@ from paster import copy_to_clipboard, paste_into_terminal
 from polisher import polish as polish_text
 from recorder import AudioRecorder
 from settings_dialog import SettingsDialog
+from startup import sync as sync_startup
 from transcriber import is_retryable_error, transcribe, translate_to_english
 
 # ── Transcription Worker ─────────────────────────────────────────────────────
@@ -203,6 +204,11 @@ class PromptlyApp(QObject):
                 f"Saved hotkey '{configured_hotkey}' is not supported. "
                 "Open Settings and choose another hotkey."
             )
+
+        # Launch with Windows: keep the registry Run entry in step with the
+        # setting (default ON). Rewriting it each launch also heals a moved
+        # exe — the entry always points at where the app last ran from.
+        sync_startup(bool(settings.value("auto_start", True, type=bool)))
 
         # First-launch check: show Settings if no API key is configured
         self._check_first_launch()
